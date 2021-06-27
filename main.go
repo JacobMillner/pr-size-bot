@@ -67,6 +67,7 @@ func Handle(response http.ResponseWriter, request *http.Request) {
 	webhookSecret := envVar("WEBHOOK_SECRET")
 	hook, err := ghwebhooks.New(ghwebhooks.Options.Secret(webhookSecret))
 	if err != nil {
+		log.Println("Error setting up gh webhooks client")
 		return
 	}
 
@@ -86,8 +87,11 @@ func Handle(response http.ResponseWriter, request *http.Request) {
 	case ghwebhooks.ReleasePayload:
 		log.Println("received release event")
 		go processReleaseEvent(&payload)
+	case ghwebhooks.PullRequestsPayload:
+		log.Println("received PR event")
+		go processPrEvent(&payload)
 	default:
-		log.Println("missing handler")
+		log.Println("missing github webhook handler")
 	}
 
 	response.WriteHeader(http.StatusOK)
@@ -100,13 +104,26 @@ func GetV3Client() *v3.Client {
 func processReleaseEvent(p *ghwebhooks.ReleasePayload) {
 	// TODO: make these env vars global
 	orgID := envVar("ORG_ID")
-	pr, _, err := GetV3Client().PullRequests.Create(context.TODO(), orgID, "target-repository", &v3.NewPullRequest{
+	pr, _, err := GetV3Client().PullRequests.Create(context.TODO(), orgID, envVar("REPO_NAME"), &v3.NewPullRequest{
 		Title:               v3.String("Hello pull request!"),
 		Head:                v3.String("develop"),
 		Base:                v3.String("master"),
 		Body:                v3.String("This is an automatically created PR."),
 		MaintainerCanModify: v3.Bool(true),
 	})
+	if err != nil {
+		if !strings.Contains(err.Error(), "A pull request already exists") {
+			log.Printf("error creating pull request: %v\n", err)
+		}
+	} else {
+		log.Printf("created pull request: %s", pr.GetURL())
+	}
+}
+
+func processPrEvent(p *ghwebhooks.PullRequestsPayload) {
+	// TODO: make these env vars global
+	orgID := envVar("ORG_ID")
+	pr, _, err := GetV3Client().PullRequests.Edit(context.TODO(), orgID, envVar("REPO_NAME"), p.PullRequest)
 	if err != nil {
 		if !strings.Contains(err.Error(), "A pull request already exists") {
 			log.Printf("error creating pull request: %v\n", err)
